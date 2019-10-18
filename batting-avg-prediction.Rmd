@@ -20,8 +20,13 @@ rmse <- function(pred, actual) {
     sqrt(mean(resid^2))
 }
 
-batting <- read_csv("batting.csv") %>%
-    janitor::clean_names()
+# download from my github for reproducibility
+batting <- read_csv("https://raw.githubusercontent.com/jtcies/phillies-task/master/batting.csv") %>%
+   janitor::clean_names()
+
+# bring in two additional data sets, both from fangraphs
+# advanced batting from mar/apr 2018
+
 
 set.seed(2019)
 

@@ -1,0 +1,139 @@
+---
+
+---
+
+```{r setup}
+
+knitr::opts_chunk$set(fig.align = "center", fig.width = 8, fig.asp = 0.618)
+
+library(tidyverse)
+library(tidymodels)
+#devtools::install_github("jtcies/jtcr")
+library(jtcr)
+library(irlba)
+
+theme_set(theme_jtc())
+
+rmse <- function(pred, actual) {
+
+    resid <- pred - actual
+    sqrt(mean(resid^2))
+}
+
+batting <- read_csv("batting.csv") %>%
+    janitor::clean_names()
+
+set.seed(2019)
+
+train <- batting %>%
+    sample_frac(0.8)
+
+test <- batting %>%
+    filter(!playerid %in% train$playerid)
+
+```
+
+## EDA
+
+```{r eda}
+
+train %>%
+    ggplot(aes(full_season_avg)) +
+        geom_histogram() 
+
+## normally distributed
+
+as_tibble(cor(train[, 4:29])) %>%
+    mutate(var1 = colnames(train[, 4:29])) %>%
+    gather(var2, cor, 1:26) %>%
+    ggplot(aes(var1, var2, fill = cor)) +
+        geom_tile() +
+        scale_fill_gradient2() +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+train %>%
+    ggplot(aes(mar_apr_avg, full_season_avg)) +
+        geom_point() +
+        geom_smooth(method = "lm") +
+        geom_abline(color = "red") +
+        geom_hline(yintercept = mean(train$mar_apr_avg), linetype = 3) +
+        geom_vline(xintercept = mean(train$full_season_avg), linetype = 3)
+
+# pretty serious regression to the mean
+
+```
+
+## PCA
+
+```{r pca}
+
+# https://juliasilge.com/blog/stack-overflow-pca/
+
+avg_pca <- prcomp_irlba(train[, 4:28], n = 10, scale. = TRUE)
+
+pca_tidy <- as_tibble(avg_pca$rotation) %>%
+    mutate(var = colnames(train[, 4:28])) %>%
+    gather(pc, contribution, -var)
+
+pca_tidy %>%
+    filter(pc == "PC2") %>%
+    mutate(var = fct_reorder(var, contribution)) %>% 
+    ggplot(aes(var, contribution)) + 
+        geom_col() +
+        facet_wrap(~pc) +
+        coord_flip() 
+
+```
+
+## model
+
+```{r scale}
+
+#https://tidymodels.github.io/parsnip/articles/articles/Regression.html
+
+scaled <- train %>%
+    select(4:29) %>%
+    mutate_all(function(x) scale(x)[,1])
+```
+
+```{r rf}
+
+rf <- rand_forest(mode = "regression", mtry = .preds(), trees = 1000) %>%
+    set_engine("randomForest") %>%
+    fit(full_season_avg ~ ., data = scaled) 
+
+```
+
+```{r lasso}
+
+lasso <- linear_reg(penalty = 0.001) %>%
+    set_engine("glmnet") %>%
+    fit(full_season_avg ~ ., data = scaled)
+
+
+```
+
+## Evaluate precitions
+
+```{r pred}
+
+preds <- scaled %>%
+    bind_cols(predict(rf, new_data = .) %>% rename(rf_pred = .pred)) %>%
+    bind_cols(predict(lasso, new_data = .) %>% rename(lasso_pred = .pred))
+
+c("rf_pred", "lasso_pred") %>% 
+    set_names() %>%
+    purrr::map(~ metrics(data = preds, truth = full_season_avg, estimate = .x)) 
+
+
+preds %>%
+    select(full_season_avg, rf_pred, lasso_pred) %>%
+    gather(model, pred, 2:3) %>%
+    ggplot(aes(pred, full_season_avg)) +
+        geom_point() +
+        facet_wrap(~ model) +
+        geom_abline(color = "red", lty = 2)
+
+```
+

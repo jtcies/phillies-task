@@ -25,18 +25,54 @@ batting <- read_csv("https://raw.githubusercontent.com/jtcies/phillies-task/mast
    janitor::clean_names()
 
 # bring in two additional data sets, both from fangraphs
-# advanced batting from mar/apr 2018
+# batted ball data from mar/apr 2018
 
+batted_ball <- read_csv("https://raw.githubusercontent.com/jtcies/phillies-task/master/batted-ball-2018.csv") %>%
+    janitor::clean_names() %>%
+    select(-name, -team, -babip) %>% 
+    mutate_if(is.character, readr::parse_number) %>% 
+    mutate_at(vars(ends_with("percent")), function(x) x / 100)
+
+# and batting data from full 2017 season
+
+batting_2017 <- read_csv("https://raw.githubusercontent.com/jtcies/phillies-task/master/batting-2017.csv") %>%
+    janitor::clean_names() %>%
+    select(-name, -team, -ubr, -w_gdp, -w_rc_2) %>% 
+    mutate_if(is.character, readr::parse_number) %>% 
+    mutate_at(vars(ends_with("percent")), function(x) x / 100)
+ 
+colnames(batting_2017) <- paste0(colnames(batting_2017), "_2017")
+
+full_batting <- batting %>%
+    left_join(batted_ball, by = "playerid") %>%
+    left_join(batting_2017, by = c("playerid" = "playerid_2017"))
 
 set.seed(2019)
 
-train <- batting %>%
+train <- full_batting %>%
     sample_frac(0.8)
 
-test <- batting %>%
+test <- full_batting %>%
     filter(!playerid %in% train$playerid)
 
 ```
+
+```{r missing}
+
+#sum(!complete.cases(train))
+# not many missing so i will just take the mean
+
+train_means <- train %>% 
+    purrr::map_if(is.numerictra, function(x) mean(x, na.rm = TRUE))
+
+for (i in 1:ncol(train)) {
+    
+    train[, i] <- ifelse(is.na(train[, i]), train_means[[i]], train[, i])
+    
+}
+
+```
+
 
 ## EDA
 

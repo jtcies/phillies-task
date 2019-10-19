@@ -7,10 +7,12 @@
 knitr::opts_chunk$set(fig.align = "center", fig.width = 8, fig.asp = 0.618)
 
 library(tidyverse)
-library(tidymodels)
 #devtools::install_github("jtcies/jtcr")
 library(jtcr)
 library(irlba)
+library(glmnet)
+library(randomForest)
+library(caret)
 
 theme_set(theme_jtc())
 
@@ -62,36 +64,53 @@ test <- full_batting %>%
 #sum(!complete.cases(train))
 # not many missing so i will just take the mean
 
-train_means <- train %>% 
-    purrr::map_if(is.numerictra, function(x) mean(x, na.rm = TRUE))
+train_means <- lapply(train[, 4:ncol(train)], function(x) mean(x, na.rm = TRUE)) 
 
-for (i in 1:ncol(train)) {
-    
-    train[, i] <- ifelse(is.na(train[, i]), train_means[[i]], train[, i])
-    
+impute_missing <- function(df) {
+
+    ret <- df[, 4:ncol(df)]
+
+     for(i in 1:ncol(ret)) {
+        for (j in 1:nrow(ret)) {
+           if (is.na(ret[j, i])) {
+               ret[j, i] <- train_means[[i]]
+            }
+        }
+
+    }
+
+    bind_cols(df[, 1:3], ret)
 }
 
-```
+train_impute <- impute_missing(train)
 
+```
 
 ## EDA
 
 ```{r eda}
 
-train %>%
+train_impute %>%
     ggplot(aes(full_season_avg)) +
-        geom_histogram() 
+        geom_histogram(binwidth = 0.01) +
+        labs(title = "Distribution of final average")
+```
 
-## normally distributed
+```{r}
 
-as_tibble(cor(train[, 4:29])) %>%
-    mutate(var1 = colnames(train[, 4:29])) %>%
-    gather(var2, cor, 1:26) %>%
+# normally distributed
+
+as_tibble(cor(train_impute[, 4:ncol(train_impute)])) %>%
+    mutate(var1 = colnames(train[, 4:ncol(train_impute)])) %>%
+    gather(var2, cor, -var1) %>%
     ggplot(aes(var1, var2, fill = cor)) +
         geom_tile() +
         scale_fill_gradient2() +
-        theme(axis.text.x = element_text(angle = 90, hjust = 1))
+        theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+        labs(title = "Correlation Matrix")
 
+```
+```{r}
 
 train %>%
     ggplot(aes(mar_apr_avg, full_season_avg)) +
@@ -101,7 +120,7 @@ train %>%
         geom_hline(yintercept = mean(train$mar_apr_avg), linetype = 3) +
         geom_vline(xintercept = mean(train$full_season_avg), linetype = 3)
 
-# pretty serious regression to the mean
+# regression to the mean
 
 ```
 
@@ -111,70 +130,56 @@ train %>%
 
 # https://juliasilge.com/blog/stack-overflow-pca/
 
-avg_pca <- prcomp_irlba(train[, 4:28], n = 10, scale. = TRUE)
+avg_pca <- prcomp_irlba(
+    train_impute[, 4:ncol(train_impute)],
+    n = 56, 
+    scale. = TRUE
+)
 
 pca_tidy <- as_tibble(avg_pca$rotation) %>%
-    mutate(var = colnames(train[, 4:28])) %>%
+    mutate(var = colnames(train_impute[, 4:ncol(train_impute)])) %>%
     gather(pc, contribution, -var)
 
-pca_tidy %>%
-    filter(pc == "PC2") %>%
-    mutate(var = fct_reorder(var, contribution)) %>% 
-    ggplot(aes(var, contribution)) + 
-        geom_col() +
-        facet_wrap(~pc) +
-        coord_flip() 
+tibble(variance = avg_pca$sdev^2, pc = 1:56) %>%
+    mutate(
+        prop_var = variance / sum(variance), 
+        cumulative_variance = cumsum(prop_var)
+    ) %>%
+    ggplot(aes(pc, cumulative_variance)) +
+        geom_line() +
+        geom_point() +
+        labs(title = "Proportion of variance explained by each PC")
+
+# it looks like most of the variance is explained by the first 40 pcs
 
 ```
 
 ## model
 
-```{r scale}
+```{r modelsetup}
 
-#https://tidymodels.github.io/parsnip/articles/articles/Regression.html
-
-scaled <- train %>%
-    select(4:29) %>%
+# https://topepo.github.io/caret/model-training-and-tuning.html#basic-parameter-tuning
+train_scaled <- train_impute %>%
+    select(4:ncol(train_impute)) %>%
     mutate_all(function(x) scale(x)[,1])
+
+train_model <- bind_cols(train_scaled, tbl_df(avg_pca$x[, 1:40]))
+
+
+fit_ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+
 ```
 
 ```{r rf}
 
-rf <- rand_forest(mode = "regression", mtry = .preds(), trees = 1000) %>%
-    set_engine("randomForest") %>%
-    fit(full_season_avg ~ ., data = scaled) 
+rf_tune <- expand.grid(.mtry = 10:90)
 
-```
-
-```{r lasso}
-
-lasso <- linear_reg(penalty = 0.001) %>%
-    set_engine("glmnet") %>%
-    fit(full_season_avg ~ ., data = scaled)
-
-
-```
-
-## Evaluate precitions
-
-```{r pred}
-
-preds <- scaled %>%
-    bind_cols(predict(rf, new_data = .) %>% rename(rf_pred = .pred)) %>%
-    bind_cols(predict(lasso, new_data = .) %>% rename(lasso_pred = .pred))
-
-c("rf_pred", "lasso_pred") %>% 
-    set_names() %>%
-    purrr::map(~ metrics(data = preds, truth = full_season_avg, estimate = .x)) 
-
-
-preds %>%
-    select(full_season_avg, rf_pred, lasso_pred) %>%
-    gather(model, pred, 2:3) %>%
-    ggplot(aes(pred, full_season_avg)) +
-        geom_point() +
-        facet_wrap(~ model) +
-        geom_abline(color = "red", lty = 2)
+rf_fit <- caret::train(
+    full_season_avg ~ ., 
+    method = "rf",
+    data = train_model,
+    trControl = fit_ctrl
+)
 
 ```
 

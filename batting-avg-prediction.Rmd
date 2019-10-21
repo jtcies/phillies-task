@@ -1,24 +1,32 @@
 ---
-
+title: "Predicting End of Season Batting Average"
+author: "Joe Ciesielski"
+date: "2019-10-20"
+output: 
+  html_document:
+    css: style.css
 ---
 
-```{r setup}
 
-knitr::opts_chunk$set(fig.align = "center", fig.width = 8, fig.asp = 0.618)
+```{r initial, message=FALSE}
+
+knitr::opts_chunk$set(fig.align = "center", fig.width = 10, fig.asp = 0.618)
 
 library(tidyverse)
+library(tidymodels)
 #devtools::install_github("jtcies/jtcr")
 library(jtcr)
-library(irlba)
 library(glmnet)
-library(randomForest)
+library(ranger)
+library(xgboost)
 library(caret)
+library(scales)
 
 theme_set(theme_jtc())
 
-rmse <- function(pred, actual) {
+rmse <- function(df, pred) {
 
-    resid <- pred - actual
+    resid <- pred - df$full_season_avg 
     sqrt(mean(resid^2))
 }
 
@@ -31,7 +39,7 @@ batting <- read_csv("https://raw.githubusercontent.com/jtcies/phillies-task/mast
 
 batted_ball <- read_csv("https://raw.githubusercontent.com/jtcies/phillies-task/master/batted-ball-2018.csv") %>%
     janitor::clean_names() %>%
-    select(-name, -team, -babip) %>% 
+    select(buh_percent:playerid) %>%
     mutate_if(is.character, readr::parse_number) %>% 
     mutate_at(vars(ends_with("percent")), function(x) x / 100)
 
@@ -59,10 +67,27 @@ test <- full_batting %>%
 
 ```
 
+## Introduction
+
+For this analysis, I was tasked with predicting end of season batting average based on data available during the first few weeks of the season. 
+
+I included two additional data sets. First, I included batted ball data from March and April of 2018. Second, I included advanced batting stats from the entire 2017 season. Both were downloaded from Fangraphs. 
+
+I split the data into a training set and a holdout test set for evaluating the quality of our predictions and analyzing overfitting. 
+
+## Exploratory Analysis
+
+First I want to investigate any missingness in the data. 
+
 ```{r missing}
 
-#sum(!complete.cases(train))
-# not many missing so i will just take the mean
+sum(!complete.cases(train))
+
+```
+
+There are only a few cases where we are missing data. I will fill these values in with the column means. Below I create a function to impute the missing data based on the training set. This will be helpful later to impute missing values in our test set, for which we will have to use the training means as well. 
+
+```{r impute}
 
 train_means <- lapply(train[, 4:ncol(train)], function(x) mean(x, na.rm = TRUE)) 
 
@@ -86,61 +111,75 @@ train_impute <- impute_missing(train)
 
 ```
 
-## EDA
+Let's look at the distribution of the full season batting average.
 
 ```{r eda}
 
 train_impute %>%
     ggplot(aes(full_season_avg)) +
         geom_histogram(binwidth = 0.01) +
-        labs(title = "Distribution of final average")
+        labs(title = "Distribution of final average",
+             x = "full season average")
+
 ```
 
-```{r}
+It's normally distributed with an mean around .250. This is consistent with my intuition that an average player hits around .250. How do the other variables correlate with the average? 
 
-# normally distributed
+```{r, fig.width=11}
 
 as_tibble(cor(train_impute[, 4:ncol(train_impute)])) %>%
     mutate(var1 = colnames(train[, 4:ncol(train_impute)])) %>%
     gather(var2, cor, -var1) %>%
-    ggplot(aes(var1, var2, fill = cor)) +
-        geom_tile() +
-        scale_fill_gradient2() +
-        theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-        labs(title = "Correlation Matrix")
+    filter(var1 == "full_season_avg", var2 != "full_season_avg") %>%
+    top_n(20, abs(cor)) %>%
+    mutate(var2 = fct_reorder(var2, cor)) %>%
+    ggplot(aes(var2, cor, fill = cor)) +
+        geom_col(show.legend = FALSE) +
+        coord_flip() +
+		labs(y = "correlation with final average",
+			 x = "variable",
+			 title = "Correlation between average and other variables",
+			 subtitle = "20 variables with the strongest correlations")
 
 ```
+
+March/April average has the highest correlation. Full season average for 2017 has a slightly lower correlation that I expected relative to other other variables. On-base percentage and hits have a positive relationship with average while strikeouts and soft hits have a negative relationship.
+
+Let's investigate the relationship between the March/April average and the final average. 
+
 ```{r}
 
-train %>%
+train_impute %>%
     ggplot(aes(mar_apr_avg, full_season_avg)) +
         geom_point() +
         geom_smooth(method = "lm") +
         geom_abline(color = "red") +
         geom_hline(yintercept = mean(train$mar_apr_avg), linetype = 3) +
-        geom_vline(xintercept = mean(train$full_season_avg), linetype = 3)
-
-# regression to the mean
+        geom_vline(xintercept = mean(train$full_season_avg), linetype = 3) +
+        labs(title = "Relationship between April and full-season average",
+             subtitle = "shows regression to the mean",
+			 caption = "red line shows slope of 1\nblue line shows fitted relationship\ndotted line shows averages",
+			 y = "final average",
+			 x = "March/April average")
 
 ```
 
+On this chart points close to the red line maintained their average through the end of the season. Here we see a regression to the mean by the end of the season - the fitted blue line shows that those with high or low averages in the early part of the season tended toward a more 'average' average by the end of the season.
+
 ## PCA
+
+Because we have relatively high number of variables relative to the number of available observations, I wanted to explore reducing the dimensionality of our data. Principal components analysis (PCA) is a way of reducing high-dimensional data into a set a features which explain the variability in the data. Below I analyze the principal components of the training data. 
 
 ```{r pca}
 
+train_no_dep <- train_impute %>%
+    select(-full_season_avg, -c(1:3))
+
 # https://juliasilge.com/blog/stack-overflow-pca/
 
-avg_pca <- prcomp_irlba(
-    train_impute[, 4:ncol(train_impute)],
-    n = 56, 
-    scale. = TRUE
-)
+avg_pca <- prcomp(train_no_dep, center = TRUE, scale. = TRUE)
 
-pca_tidy <- as_tibble(avg_pca$rotation) %>%
-    mutate(var = colnames(train_impute[, 4:ncol(train_impute)])) %>%
-    gather(pc, contribution, -var)
-
-tibble(variance = avg_pca$sdev^2, pc = 1:56) %>%
+tibble(variance = avg_pca$sdev^2, pc = 1:47) %>%
     mutate(
         prop_var = variance / sum(variance), 
         cumulative_variance = cumsum(prop_var)
@@ -148,38 +187,337 @@ tibble(variance = avg_pca$sdev^2, pc = 1:56) %>%
     ggplot(aes(pc, cumulative_variance)) +
         geom_line() +
         geom_point() +
-        labs(title = "Proportion of variance explained by each PC")
-
-# it looks like most of the variance is explained by the first 40 pcs
+        scale_y_continuous(labels = scales::percent_format()) +
+        labs(title = "Proportion of variance explained by each PC",
+             y = "cumulative variance explained",
+             x = "principal components")
 
 ```
 
-## model
+This chart shows that the first 30 principal components explain nearly all of the variation in our data. Let's look at the first two. 
+
+```{r pc1}
+
+as_tibble(avg_pca$rotation) %>%
+	bind_cols(tibble(var = colnames(train_no_dep))) %>%
+	mutate(var = fct_reorder(var, PC1)) %>%
+	ggplot(aes(var, PC1, fill = var)) +
+		geom_col(show.legend = FALSE) +
+		coord_flip() +
+        labs(title = "Variable contribution to PC1",
+             x = "variable",
+             y = "contribution to principal component")
+
+
+```
+
+The first principal component differentiates good hitters - high OPS and slugging, particularly from 2017 - and bad hitters - high strikeout rates and a higher percentage of soft hits.
+
+```{r pc2}
+
+as_tibble(avg_pca$rotation) %>%
+	bind_cols(tibble(var = colnames(train_no_dep))) %>%
+	mutate(var = fct_reorder(var, PC2)) %>%
+	ggplot(aes(var, PC2, fill = var)) +
+		geom_col(show.legend = FALSE) +
+		coord_flip() +
+        labs(title = "Variable contribution to PC2",
+             x = "variable",
+             y = "contribution to principal component")
+```
+
+The second principal components appears to separate power hitters and contact hitters. On the top we can see strike out rate, ISO, homeruns, and hard-hit balls; on the bottom is contact percent.
+
+```{r pc12}
+
+as_tibble(avg_pca$x) %>%
+	ggplot(aes(PC1, PC2)) +
+		geom_point() +
+        labs(title = "Plotting the first two principal components")
+
+```
+We don't see to much a relationship between principal components one and two. This implies that good hitters (as defined by PC1) can be both contact or power hitters (as defined by PC2). There's much more to do with this analysis but our goal is to predict the final average for the season. Below I plot the correlations between these components and the full season average. 
+
+```{r pcaavgcor}
+
+as_tibble(avg_pca$x) %>%
+    bind_cols(train_impute %>% select(full_season_avg)) %>%
+    cor() %>%
+    tbl_df() %>%
+    select(full_season_avg) %>%
+    rownames_to_column(var = "pc") %>%
+    filter(full_season_avg != 1) %>%
+    top_n(20, abs(full_season_avg)) %>%
+    mutate(pc = fct_reorder(pc, full_season_avg)) %>%
+    ggplot(aes(pc, full_season_avg, fill = full_season_avg)) +
+        geom_col(show.legend = FALSE) +
+        coord_flip() +
+        labs(title = "Correlation between principal components and average",
+             y = "correlation with batting average",
+             x = "principal component")
+
+```
+
+The first two principal components have the strongest relationship with final average, both in the negative direction. However, these correlations are weaker than those with the original data. We also know that we would need to include the first 30 components to capture most of the variation in our data. This suggests the principal components will not provide a much better dataset for predicting average. 
+
+## Modeling
+
+Before I build the models, we should do some pre-processing. I want to transform the data to put all of the predictors on the same scale. I create a function to make this easier to apply to our test set. 
 
 ```{r modelsetup}
 
-# https://topepo.github.io/caret/model-training-and-tuning.html#basic-parameter-tuning
-train_scaled <- train_impute %>%
-    select(4:ncol(train_impute)) %>%
-    mutate_all(function(x) scale(x)[,1])
+train_numeric <- train_impute %>%
+	select(4:ncol(.))
 
-train_model <- bind_cols(train_scaled, tbl_df(avg_pca$x[, 1:40]))
+scale_data <- function(df) {
+	for (i in 1:ncol(df)) {
+		df[, i] <- (df[, i] - mean(train_numeric[[i]])) / sd(train_numeric[[i]])
+	}
+	df
+}
 
-
-fit_ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+train_model <- train_numeric %>%
+	scale_data() 
 
 ```
 
+### Basic linear model
+
+I start with simple linear model using both the principal components and the original data. This model is unlikely to provide a good prediction but can give us something to benchmark against. It can also help us decide if we want to use the principal components or the original data for our model.
+
+```{r}
+
+pca_model <- as_tibble(avg_pca$x) %>%
+	select(1:30) %>%
+	bind_cols(train_numeric %>% select(full_season_avg)) %>%
+	mutate(full_season_avg = scale(full_season_avg)[,1])
+
+lm_w_pc <- lm(full_season_avg ~ ., data = pca_model)
+
+lm_wo_pc <- lm(full_season_avg ~ ., data = train_model)
+
+
+bind_rows(
+    glance(lm_w_pc) %>%
+        mutate(model = "principal components"), 
+    glance(lm_wo_pc) %>%
+        mutate(model = "original data")
+) %>%
+    select(model, adj.r.squared) %>%
+    knitr::kable()
+
+```
+
+The linear model model based on the original predictors does about the same as the one based on the principal components. We'll use the raw data moving forward. 
+
+### Machine learning
+
+I'll fit a few different models and evaluate them compared to each other. I use the `caret` package for this analysis which simplifies cross-validation which will prove important in reducing overfitting. It also enables grid-search for hyperparameters. To evaluate our models, I will use root mean squared error (RMSE). 
+
+```{r fitctrl}
+
+# https://topepo.github.io/caret/model-training-and-tuning.html#basic-parameter-tuning
+
+fit_ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3,
+			search = "random")
+
+```
+
+First I'll fit a random forest which uses a series of bagged decision trees to generate predictions. 
+
 ```{r rf}
 
-rf_tune <- expand.grid(.mtry = 10:90)
+rf_tune <- expand.grid(
+	mtry = seq(ncol(train_model) * 0.2, ncol(train_model) * 0.9, length.out = 5),
+	splitrule = "variance",
+	min.node.size = c(5, 10)
+)
 
 rf_fit <- caret::train(
     full_season_avg ~ ., 
-    method = "rf",
+    method = "ranger",
     data = train_model,
-    trControl = fit_ctrl
+    trControl = fit_ctrl,
+    tuneGrid = rf_tune
 )
 
 ```
 
+Next I use a regularized regression. This is similar to linear regression, but applies a penalty to the parameters to reduce overfitting. By using a grid search of paramters, this searches through Ridge, Lasso, and Elastic Net models to find the ideal set of parameters.  
+
+```{r glm}
+
+glm_tune <- expand.grid(
+	alpha = seq(0, 1, length.out = 20),
+	lambda = seq(0, 0.3, length.out = 100)
+)
+
+glm_fit <- caret::train(
+    full_season_avg ~ ., 
+    method = "glmnet",
+    data = train_model,
+    trControl = fit_ctrl,
+	tuneGrid = glm_tune
+)
+
+```
+
+Finally I use XGBoost, another tree-based model that uses gradient boosted trees. 
+
+```{r xgb}
+
+xgb_ctrl <- trainControl(
+	method = "cv",
+	number = 5,
+	allowParallel = TRUE
+)
+
+xgb_tune <- expand.grid(
+	nrounds = 200,
+    max_depth = 25,
+    colsample_bytree = 0.75,
+    eta = 0.01,
+	gamma = 0, 
+	min_child_weight = 1,
+    subsample = 0.8 
+)
+
+xgb_fit <- caret::train(
+    full_season_avg ~ ., 
+    method = "xgbTree",
+    data = train_model,
+    trControl = xgb_ctrl,
+	tuneGrid = xgb_tune
+)
+
+```
+
+### Evaluating models. 
+
+Below are the metrics for each of the models fit above. 
+
+```{r applytrain}
+
+train_preds <- train_model %>%
+    mutate(
+		`linear model` = predict(lm_wo_pc, newdata = .),
+        `random forest` = predict(rf_fit, newdata =.),
+        `regularized regression` = predict(glm_fit, newdata =.),
+        `XG Boost` = predict(xgb_fit, newdata =.)
+    )
+
+train_preds %>%
+    summarise_at(
+		vars(contains(" ")), 
+		function(x) round(rmse(train_preds, x), 3)
+	) %>%
+	knitr::kable() 
+        
+```
+
+The tree based models appear to have the best fit; however, these models are prone to overfitting. The chart below plots the predicted values against the actual final average. The tree models a show bias of not regressing the averages back to the mean enough - low predicted values are too low and high predicted values are too high. 
+
+
+```{r trainpredchart, warning=FALSE}
+
+train_preds %>%
+    select(contains(" "), full_season_avg) %>%
+    gather(mod, pred, contains(" ")) %>%
+    ggplot(aes(pred, full_season_avg)) +
+        geom_point() +
+        geom_abline(color = "red") +
+        geom_smooth(method = "lm", se = FALSE) +
+        facet_wrap(~ mod) +
+		labs(x = "predicted average",
+			 y = "actual average",
+			 title = "Residuals for training data")
+
+```
+
+## Apply to holdout 
+
+To truly evaluate our models, I apply each to our holdout testing data, using the functions that I created previously. I also include a mean of the other predictions to determine if bias among the models can be balanced. 
+
+```{r testpred}
+
+test_model <- test %>%
+	impute_missing() %>%
+	select(-c(1:3)) %>% 
+	scale_data() 
+
+test_preds <- test_model %>%
+    mutate(
+		`linear model` = predict(lm_wo_pc, newdata = .),
+        `random forest` = predict(rf_fit, newdata =.),
+        `regularized regression` = predict(glm_fit, newdata =.),
+        `XG Boost` = predict(xgb_fit, newdata =.),
+		`mean predication` = (`linear model` + `random forest` + 
+			`regularized regression` + `XG Boost`) / 4
+    )
+
+test_preds %>%
+    summarise_at(
+        vars(contains(" ")), 
+        function(x) round(rmse(test_preds, x), 3)
+    ) %>%
+	knitr::kable() 
+
+```
+
+The regularized regression performs best, followed by our basic linear model. Our tree-based models perform worse - it is possible that we didn't have enough observations to train them appropriately. Below I plot the predictions against the actuals for each of the models. 
+
+```{r testpredchart, warning=FALSE}
+
+test_preds %>%
+    select(contains(" "), full_season_avg) %>%
+    gather(mod, pred, contains(" ")) %>%
+    ggplot(aes(pred, full_season_avg)) +
+        geom_point() +
+        geom_abline(color = "red") +
+        geom_smooth(method = "lm", se = FALSE) +
+        facet_wrap(~ mod) +
+		labs(x = "predicted average",
+			 y = "actual average",
+			 title = "Residuals for holdout data")
+
+```
+
+It's interesting to note that the tree-based models seem reluctant to make predictions on either extreme - almost all predictions for these models are within one standard deviation of the mean. This may be another indication that those models require more training data. 
+
+Finally, I unstandardize predictions to put them back on the original scale and export them. 
+
+```{r finalpreds}
+
+unscale <- function(x) {
+
+	x <- x * sd(train$full_season_avg) + mean(train$full_season_avg)
+	x
+
+}
+
+final_preds <- bind_rows(train_preds, test_preds) %>%
+	bind_cols(
+		bind_rows(
+			train %>%
+				select(1:3),
+			test %>%
+				select(1:3)
+		)
+	) %>%
+	mutate_at(vars(contains(" "), full_season_avg), unscale)
+
+final_preds %>%
+	select(playerid, full_season_avg, 
+		prediction = `regularized regression`) %>%
+	write_csv("batting_avg_predictions.csv")
+
+
+```
+
+## Next steps
+
+Next steps in this analysis would depend on potential uses. None of these are mutually exclusive, but would be prioritized based on organizational goals.
+
+- If the goal is to create the most accurate prediction, I would focus on tuning hyperparmaters, incorporating more historical data or observations, or trying different modeling techniques such as neural networks.
+- If the goal is to deploy these models into a production system, I would enhance reproducibility by creating more functions or a package to manage the analysis and pull data directly from databases. 
+- If the goal is to identify opportunities for player training or inform contract decisions, I would focus on interpretability of these models. This may include conducting more analysis of correlations between predictions and predictors, exploring variable importance for each of the models, or exploring more models that are easily interpretable. 

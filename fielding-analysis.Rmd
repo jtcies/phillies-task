@@ -1,0 +1,78 @@
+---
+title: "Fielding Analysis"
+author: "Joe Ciesielski"
+date: "2019-10-20"
+output:
+     html_document:
+        css: style.css
+---
+
+## Introduction
+
+Below I present a proposed methodology for the following request:
+
+“One of our infielders, Player X, seems to be struggling in the field. He’s got a great arm, but he’s made a few errors this season and is failing to get to some balls. Could you look into this and identify any problem areas that we can target with drills?”
+
+## Key questions
+
+I propose structuring this analysis around the following questions: 
+
+1. Is the player making more errors than expected? 
+2. What are the types of plays that this player is required to make? 
+3. Is the player more likely to make an error on certain types of plays? 
+
+## Methodology
+
+### Is the player making more errors than expected? 
+
+The first question is whether this player is in fact making more errors than we would expect based on the types of plays that they have been required to make. We want to understand whether there is a true problem or whether these issues are due to chance. It's possible that the balls hit toward this player have been hit harder or required more movement than normal and that this is responsible for the errors. 
+
+To investigate this, I would start by looking at this player's Ultimate Zone Rating (UZR - described [here](https://sabr.org/research/measuring-defense-entering-zones-fielding-statistics) and [here](https://library.fangraphs.com/defense/uzr/)). UZR calculates how many runs a typical batted ball would be worth and how often an average players converts that play into an out. By incorporating information about the hit and the situation, it can provide an objective way of understanding a player's defensive contribution. 
+
+Visualizations that show our player compared to other, comparable players as well as changes over time may prove useful. One note is that UZR accrues over time and needs to be scaled for accurate comparison. 
+
+Because UZR has some potential flaws (see 'Issues' section below), I would also visualize the defensive plays for this player compared to comparable players at the same position using a few different techniques. This may include plotting exit velocity to player distance traveled and whether or not an error was made or player positioning and landing zone. 
+
+Because this request has come directly from a coach, I would proceed with the rest of the analysis regardless of the outcome of this first question. However, it would be valuable information for the coach to understand how this player ranks compared to the average player based on an objective metric. 
+
+### Classifying defensive plays
+
+The coaches request was to help determine which type of plays might be causing our player issues to inform practice drills. Therefore we need to understand the types of defensive plays that a player at this position is required to make. Because there will be many available data points, we will have to reduce the dimensionality to something more interpretable. K-means clustering is useful for this type of analysis. K-means clustering attempts to create groups by minimizing the variance within groups while maximizing it between groups. There are various methods for choosing the optimal number of clusters (for example [here](https://en.wikipedia.org/wiki/Determining_the_number_of_clusters_in_a_data_set)). 
+
+These clusters can be visualized by comparing the means among the input variables. Ideally these clusters will complement prior knowledge of coaches; for example, we may find a cluster for slow rollers and another for hard, choppy hits. However, we hope that the groupings provide additional information, such as connecting seemingly disparate types of plays, and that this information advances the coach's understanding. 
+
+### Predicting errors
+
+Finally, I would examine whether these clusters are predictive of this player's errors. I would start with a simple logistic regression between the play cluster and whether or not an error was made. Because this analysis is focused on informing coaching efforts rather than generating the most accurate prediction, I will optimize for interpretability rather than accuracy of prediction. For this analysis, a Bayesian model that compares credible intervals for this player compared to priors set from all players (and this player's previous data), may prove useful. [This](https://gumroad.com/l/empirical-bayes) book on empirical Bayes is a helpful reference on this type of analysis.  
+
+## Data
+
+For the first stage of this analysis, Fangraphs provides data on UZR and other defensive metrics for custom date ranges [here](https://www.fangraphs.com/leaders.aspx?pos=all&stats=fld&lg=all&qual=y&type=1&season=2019&month=0&season1=2019&ind=0&team=0&rost=0&age=0&filter=&players=0&startdate=&enddate=).  
+
+The cluster analysis and prediction would require play-by-play data with information about each of the following categories:
+
+- batted ball (e.g. exit velocity and angle, direction, landing location)
+- fielder (e.g. reaction time, distance traveled, throwing speed)
+- situation (e.g. ballpark, wind, runners on base and score, batter speed to first base)
+
+## Issues
+
+### UZR
+
+UZR is known to be fairly noisy. Experts recommend collecting a minimum of three years of data before it can be reliably used. Players have to field enough plays for  the metric to factor out random variation. Additionally, UZR doesn't factor in positioning, something of interest for this particular analysis as player positioning may explain our player's issues. Finally, the metric only compares the player's ability to an average player at his position; if the fielder of interest is already above average, UZR may have a harder time eliciting whether his issues are part of a larger pattern or just due to chance. As mentioned above, visualization of the raw data related to this players (and comparison players) fielding efforts will supplement the UZR data. 
+
+### Clusters
+
+Cluster analysis is also susceptible to statistical noise. The clustering algorithm may not find clusters with sufficiently minimize within group variation, or the clusters it finds may not be helpful in a real-world context. In this case, other unsupervised algorithms, such as principal components analysis, my be helpful. It may also be necessary to move on the prediction phase using the raw data rather than the clusters as inputs. 
+
+### Imbalanced data
+
+Errors are inherently imbalanced data - far more plays are fielded successfully than those in which errors are committed. This is similar to analysis of fraud or click-throughs of online ads. In these cases, over- or under-sampling can help to create a balanced dataset. 
+
+## Resources
+
+Fielding stats and data: www.sabr.org and www.fangraphs.com
+
+Cluster analysis: https://uc-r.github.io/kmeans_clustering
+
+Empirical Bayes: https://gumroad.com/l/empirical-bayes

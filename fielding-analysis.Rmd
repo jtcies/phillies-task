@@ -29,7 +29,7 @@ The first question is whether this player is in fact making more errors than we 
 
 To investigate this, I would start by looking at this player's Ultimate Zone Rating (UZR - described [here](https://sabr.org/research/measuring-defense-entering-zones-fielding-statistics) and [here](https://library.fangraphs.com/defense/uzr/)). UZR calculates how many runs a typical batted ball would be worth and how often an average players converts that play into an out. By incorporating information about the hit and the situation, it can provide an objective way of understanding a player's defensive contribution. 
 
-Visualizations that show our player compared to other, comparable players as well as changes over time may prove useful. One note is that UZR accrues over time and needs to be scaled for accurate comparison. 
+Visualizations that show our player against other, comparable players as well as changes over time may prove useful. One note is that UZR accrues over time and needs to be scaled for accurate comparison. 
 
 Because UZR has some potential flaws (see 'Issues' section below), I would also visualize the defensive plays for this player compared to comparable players at the same position using a few different techniques. This may include plotting exit velocity to player distance traveled and whether or not an error was made or player positioning and landing zone. 
 
@@ -59,7 +59,7 @@ The cluster analysis and prediction would require play-by-play data with informa
 
 ### UZR
 
-UZR is known to be fairly noisy. Experts recommend collecting a minimum of three years of data before it can be reliably used. Players have to field enough plays for  the metric to factor out random variation. Additionally, UZR doesn't factor in positioning, something of interest for this particular analysis as player positioning may explain our player's issues. Finally, the metric only compares the player's ability to an average player at his position; if the fielder of interest is already above average, UZR may have a harder time eliciting whether his issues are part of a larger pattern or just due to chance. As mentioned above, visualization of the raw data related to this players (and comparison players) fielding efforts will supplement the UZR data. 
+UZR is known to be fairly noisy. Experts recommend collecting a minimum of three years of data before it can be reliably used. Players have to field enough plays for  the metric to smooth out random variation. Additionally, UZR doesn't factor in positioning, something of interest for this particular analysis as the player's positioning may explain some of his issues. Finally, the metric only compares the player's ability to an average player at his position; if the fielder of interest is already above average, UZR may have a harder time eliciting whether his issues are part of a larger pattern or just due to chance. As mentioned above, visualization of the raw data related to this player's (and comparison players) fielding efforts will supplement the UZR data. 
 
 ### Clusters
 
@@ -67,11 +67,11 @@ Cluster analysis is also susceptible to statistical noise. The clustering algori
 
 ### Imbalanced data
 
-Errors are inherently imbalanced data - far more plays are fielded successfully than those in which errors are committed. This is similar to analysis of fraud or click-throughs of online ads. In these cases, over- or under-sampling can help to create a balanced dataset. 
+Errors are inherently imbalanced data - far more plays are fielded successfully than those in which errors are committed. This is similar to analysis of bank fraud or click-throughs of online ads. In these cases, over- or under-sampling can help to create a balanced dataset. 
 
 ## Resources
 
-Fielding stats and data: www.sabr.org and www.fangraphs.com
+Fielding stats and data: https://www.sabr.org and https://www.fangraphs.com
 
 Cluster analysis: https://uc-r.github.io/kmeans_clustering
 

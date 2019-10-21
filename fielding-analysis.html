@@ -412,8 +412,8 @@ $(document).ready(function () {
 <div id="is-the-player-making-more-errors-than-expected" class="section level3">
 <h3>Is the player making more errors than expected?</h3>
 <p>The first question is whether this player is in fact making more errors than we would expect based on the types of plays that they have been required to make. We want to understand whether there is a true problem or whether these issues are due to chance. It’s possible that the balls hit toward this player have been hit harder or required more movement than normal and that this is responsible for the errors.</p>
-<p>To investigate this, I would start by looking at this player’s Ultimate Zone Rating (UZR - described <a href="https://sabr.org/research/measuring-defense-entering-zones-fielding-statistics">here</a> and <a href="https://library.fangraphs.com/defense/uzr/">here</a>). UZR calculates how many runs a typical batted ball would be worth and how often a typical players converts that play into an out. By incorporating information about the hit and the situation, it can provide an objective way of understanding a player’s defensive contribution.</p>
-<p>Visualizations that show our player compared to other, comparable players as well as changes over time may prove useful. One note is that UZR accrues over time and needs to be scaled for accurate comparison.</p>
+<p>To investigate this, I would start by looking at this player’s Ultimate Zone Rating (UZR - described <a href="https://sabr.org/research/measuring-defense-entering-zones-fielding-statistics">here</a> and <a href="https://library.fangraphs.com/defense/uzr/">here</a>). UZR calculates how many runs a typical batted ball would be worth and how often an average players converts that play into an out. By incorporating information about the hit and the situation, it can provide an objective way of understanding a player’s defensive contribution.</p>
+<p>Visualizations that show our player against other, comparable players as well as changes over time may prove useful. One note is that UZR accrues over time and needs to be scaled for accurate comparison.</p>
 <p>Because UZR has some potential flaws (see ‘Issues’ section below), I would also visualize the defensive plays for this player compared to comparable players at the same position using a few different techniques. This may include plotting exit velocity to player distance traveled and whether or not an error was made or player positioning and landing zone.</p>
 <p>Because this request has come directly from a coach, I would proceed with the rest of the analysis regardless of the outcome of this first question. However, it would be valuable information for the coach to understand how this player ranks compared to the average player based on an objective metric.</p>
 </div>
@@ -431,15 +431,17 @@ $(document).ready(function () {
 <h2>Data</h2>
 <p>For the first stage of this analysis, Fangraphs provides data on UZR and other defensive metrics for custom date ranges <a href="https://www.fangraphs.com/leaders.aspx?pos=all&amp;stats=fld&amp;lg=all&amp;qual=y&amp;type=1&amp;season=2019&amp;month=0&amp;season1=2019&amp;ind=0&amp;team=0&amp;rost=0&amp;age=0&amp;filter=&amp;players=0&amp;startdate=&amp;enddate=">here</a>.</p>
 <p>The cluster analysis and prediction would require play-by-play data with information about each of the following categories:</p>
-<pre><code>- batted ball (e.g. exit velocity and angle, direction, landing location)
-- fielder (e.g. reaction time, distance traveled, throwing speed)
-- situation (e.g. ballpark, wind, runners on base and score, batter speed to first base)</code></pre>
+<ul>
+<li>batted ball (e.g. exit velocity and angle, direction, landing location)</li>
+<li>fielder (e.g. reaction time, distance traveled, throwing speed)</li>
+<li>situation (e.g. ballpark, wind, runners on base and score, batter speed to first base)</li>
+</ul>
 </div>
 <div id="issues" class="section level2">
 <h2>Issues</h2>
 <div id="uzr" class="section level3">
 <h3>UZR</h3>
-<p>UZR is known to be fairly noisy. Experts recommend collecting a minimum of three years of data before it can be reliably used. Players have to field enough plays for the metric to factor out random variation. Additionally, UZR doesn’t factor in positioning, something of interest for this particular analysis as player positioning may explain our player’s issues. Finally, the metric only compares the player’s ability to an average player at his position; if the fielder of interest is already above average, UZR may have a harder time eliciting whether his issues are part of a larger pattern or just due to chance. As mentioned above, visualization of the raw data related to this players (and comparison players) fielding efforts will supplement the UZR data.</p>
+<p>UZR is known to be fairly noisy. Experts recommend collecting a minimum of three years of data before it can be reliably used. Players have to field enough plays for the metric to smooth out random variation. Additionally, UZR doesn’t factor in positioning, something of interest for this particular analysis as the player’s positioning may explain some of his issues. Finally, the metric only compares the player’s ability to an average player at his position; if the fielder of interest is already above average, UZR may have a harder time eliciting whether his issues are part of a larger pattern or just due to chance. As mentioned above, visualization of the raw data related to this player’s (and comparison players) fielding efforts will supplement the UZR data.</p>
 </div>
 <div id="clusters" class="section level3">
 <h3>Clusters</h3>
@@ -447,12 +449,12 @@ $(document).ready(function () {
 </div>
 <div id="imbalanced-data" class="section level3">
 <h3>Imbalanced data</h3>
-<p>Errors are inherently imbalanced data - far more plays are fielded successfully than those in which errors are committed. This is similar to analysis of fraud or click-throughs of online ads. In these cases, over- or under-sampling can help to create a balanced dataset.</p>
+<p>Errors are inherently imbalanced data - far more plays are fielded successfully than those in which errors are committed. This is similar to analysis of bank fraud or click-throughs of online ads. In these cases, over- or under-sampling can help to create a balanced dataset.</p>
 </div>
 </div>
 <div id="resources" class="section level2">
 <h2>Resources</h2>
-<p>Fielding stats and data: www.sabr.org and www.fangraphs.com</p>
+<p>Fielding stats and data: <a href="https://www.sabr.org" class="uri">https://www.sabr.org</a> and <a href="https://www.fangraphs.com" class="uri">https://www.fangraphs.com</a></p>
 <p>Cluster analysis: <a href="https://uc-r.github.io/kmeans_clustering" class="uri">https://uc-r.github.io/kmeans_clustering</a></p>
 <p>Empirical Bayes: <a href="https://gumroad.com/l/empirical-bayes" class="uri">https://gumroad.com/l/empirical-bayes</a></p>
 </div>
